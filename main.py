@@ -1,3 +1,6 @@
+from pathlib import Path
+import subprocess
+import traceback
 import cv2
 import mediapipe as mp
 import json
@@ -7,33 +10,38 @@ import os
 
 os.environ["GLOG_minloglevel"] = "0"
 
-def run(input_video, output=None):
+def run(input_video, tmp_dir='.', output=None, silent=True):
   # abort if the video doesn't exist
   if not os.path.exists(input_video):
-    print(f'🛑 Video {input_video} does not exist')
+    if not silent: print(f'🛑 Video {input_video} does not exist')
     exit(1)
 
   # abort if the output file already exists
   if output and os.path.exists(output):
-    print(f'🛑 Output file {output} already exists')
+    if not silent: print(f'🛑 Output file {output} already exists')
     exit(1)
 
-  print(f'📽️ Processing video {input_video}...')
+  if not silent: print(f'📽️ Processing video {input_video}...')
   # first convert the video to 10 fps
-  (
+  ffmpge_cmd = (
     ffmpeg
     .input(input_video)
     .filter('fps', fps=10)
-    .output('temp.mp4')
+    .output(str(Path(tmp_dir) / 'temp.mp4'))
     .global_args("-loglevel", "error")
     .global_args("-hide_banner")
     .global_args("-nostdin")
-    .run()
+    .global_args("-y")
+    .compile()
   )
+  si = subprocess.STARTUPINFO()
+  si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+  #si.wShowWindow = subprocess.SW_HIDE # default
+  subprocess.call(ffmpge_cmd, startupinfo=si)
 
   mp_pose = mp.solutions.pose
 
-  cap = cv2.VideoCapture("temp.mp4")
+  cap = cv2.VideoCapture(str(Path(tmp_dir) / 'temp.mp4'))
   with mp_pose.Pose(
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5) as pose:
@@ -70,9 +78,9 @@ def run(input_video, output=None):
   cap.release()
 
   # delete the temp file
-  os.remove('temp.mp4')
+  os.remove(Path(tmp_dir) / 'temp.mp4')
 
-  print(f'🎉 Pose data successfully saved to {output}!')
+  if not silent: print(f'🎉 Pose data successfully saved to {output}!')
 
   return json.dumps(pose_data)
 
@@ -80,7 +88,8 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument('-i', '--video', type=str, required=True)
   parser.add_argument('-o', '--output', type=str, default='output.json')
+  parser.add_argument('-s', '--silent', action='store_true', default=False)
 
   args = parser.parse_args()
 
-  run(args.video, args.output)
+  run(args.video, args.output, args.silent)
